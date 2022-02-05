@@ -1,0 +1,181 @@
+---
+title: "Tytanis - analiza przeżycia"
+author: "Michał rab"
+date: "5 02 2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(ggcorrplot)
+library(ggpubr)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(car)
+```
+
+# Wstęp
+Niemal każdy z nas słyszał o katastrofie RMS Titanic - transatlantyckiego statku pasażerskiego typu Olympic. Przyczyną katastrofy było zderzenie się z górą lodową, w wyniku czego statek zatonął, a śmierć poniosło ok. 1500 osób (dane o ofiarach są niejednoznaczne).
+
+# Cel analizy
+Celem analizy jest sprawdzenie, jakie czynniki miały wpływ na przeżycie katastrofy. 
+
+# Analiza
+Na początku wczytany zostanie plik z przygotowanymi wcześniej danymi
+
+## Kto przeżył?
+Na wstępie spróbujmy przyjrzeć się podstawowym danym.
+Zobaczmy, jakie dane dostępne są w zbiorze danych:
+
+```{r tytanis, echo=FALSE}
+tytanis = read.csv("./TitanicCleaned.tsv", sep = "\t", header = TRUE, na.strings = c("", "NA"))
+str(tytanis)
+```
+
+Zobaczmy, kto przeżył, na podstawie samej płci. Zliczone zostaną osoby (osobno kobiety i mężczyźni), które przeżyły, a następnie podzielone zostaną przez całkowitą liczbę osób (osobno kobiety i mężczyźni).
+
+```{r surv-sex, echo=FALSE}
+females = subset(tytanis, Sex == "female")
+males = subset(tytanis, Sex == "male")
+print(paste("Przeżywalność kobiet [%]:", round(nrow(females[females$Survived == 1, ]) / nrow(females), digits = 2)))
+print(paste("Przeżywalność mężczyzn [%]: ", round(nrow(males[males$Survived == 1, ]) / nrow(males), digits = 2)))
+
+tytanis$Survived = as.factor(tytanis$Survived)
+
+
+ggplot(tytanis, aes(x = Sex, fill = Survived)) +
+  geom_bar() +
+  ggtitle("Przeżywalność kobiet i mężczyzn") +
+  xlab("Płeć") +
+  ylab("Total Count") +
+labs(fill = "Survived")
+```
+
+Jak widać, płeć ma bardzo duże znaczenie. Zobaczmy, jak wygląda przeżywalność z uwzględnieniem klasy.
+
+```{r class, echo=FALSE}
+ggplot(tytanis, aes(x = Pclass, fill = Survived)) +
+  geom_bar() +
+  ggtitle("Klasa a przeżywalność") +
+  xlab("Klasa") +
+  ylab("Total Count") +
+labs(fill = "Survived")
+```
+Wyraźnie widać, że największą szansę na przeżycie miały osoby płynące w pierwszej klasie - przeżyło niemal 3/4 takich osób. Osoby płynące drugą klasą miały około 1/2 szans na przeżycie. Osoby płynące trzecią klasą nieco ponad 1/4.Zobaczmy, jak wygląda przeżywalność z uwzględnieniem wieku.
+
+```{r age, echo=FALSE}
+ggplot(tytanis, aes(x = Age, fill = Survived)) +
+  geom_bar() +
+  ggtitle("Wiek a przeżywalność") +
+  xlab("Wiek") +
+  ylab("Total Count") +
+labs(fill = "Survived")
+```
+
+Wizualnie widać, że odsetek młodszych osób, które przeżyły, jest wyraźnie wyższy. Zobaczmy, jak prezentuje się przeżywalność z uwzględnieniem zarówno płci, wieku i klasy.
+
+```{r surv-mixed, echo=FALSE}
+ggplot(tytanis, aes(x = Age, fill = Survived, color = Survived)) +
+  facet_wrap(Sex~Pclass) + 
+  geom_histogram(binwidth = 5) +
+  labs(x = 'Age', y = 'Survived')
+```
+
+Zwróćmy uwagę na porównanie przeżywalności a portu, z którego wypłynęły dane osoby
+
+```{r survival-emb, echo=FALSE}
+ggplot(tytanis, aes(x = Embarked, fill = Survived)) +
+  geom_bar() +
+  ggtitle("Port a przeżywalność") +
+  xlab("Port") +
+  ylab("Total Count") +
+labs(fill = "Survived")
+
+ggplot(tytanis, aes(x = Age, fill = Survived, color = Survived)) +
+  facet_wrap(Sex~Embarked) + 
+  geom_histogram(binwidth = 5) +
+  labs(x = 'Age', y = 'Survived')
+```
+
+Zobaczmy jeszcze, jak wygląda przeżywalność w zależności od płci i portu
+
+```{r empcombined, echo=FALSE}
+ggplot(tytanis, aes(x = Sex, fill = Survived)) +
+  geom_bar() +
+  facet_wrap(~Embarked) + 
+  ggtitle("Płeć, port i przeżywalność") +
+  xlab("Sex") +
+  ylab("Total Count") +
+labs(fill = "Survived")
+```
+
+Wyraźnie widać, że osoby płynące z Queenstown i Southampton miały zdecydowanie niższą szansę na przeżycie względem osób płynących z Cherbourg. Zobaczmy, jak wyglądały klasy względem portów
+
+```{r emb-clz, echo=FALSE}
+ggplot(tytanis, aes(x = Pclass, fill = Survived)) +
+  geom_bar() +
+  facet_wrap(~Embarked) + 
+  ggtitle("Płeć, port i przeżywalność") +
+  xlab("Port") +
+  ylab("Total Count") +
+labs(fill = "Survived")
+```
+
+Zobaczmy, jaka jest przeżywalność dzieci:
+```{r chld, echo=FALSE}
+chld = tytanis[tytanis$Age < 18, ]
+ggplot(chld, aes(x = Sex, fill = Survived)) +
+  geom_bar() +
+  ggtitle("Przeżywalność dziewczynek i chłopców") +
+  xlab("Płeć") +
+  ylab("Total Count") +
+labs(fill = "Survived")
+```
+Przeżywalność dziewczynek jest nieznacznie niższa, niż przeżywalność kobiet. Przeżywalność chłopców jest zdecydowanie wyższa, niż przeżywalność mężczyzn.
+
+## Istotność cech
+
+Zbudujmy drzewo decyzyjne, które pozwoli określić nam istotność danych cech.
+
+```{r tree}
+decisionTree = rpart(Survived~., data = tytanis, method = "class")
+rpart.plot(decisionTree, extra = 3, fallen.leaves = T)
+```
+
+Dzięki drzewu możemy zauważyć, że trzema naistotniejszymi cechami decydującymi o przeżyciu jest płeć, wiek i klasa (sex, age, pclass). Spróbujmy sprawdzić dokładność tego modelu:
+
+```{r prediction}
+prediction = predict(decisionTree, data = tytanis, type = "class")
+confusion = confusionMatrix(prediction, tytanis$Survived)
+print(confusion)
+```
+
+Jak widać jest ona całkiem wysoka - wynosi niemal 84%.
+
+
+## Podsumowanie
+Największą szansę na przeżycie miały kobiety poniżej 18 roku życia płynące 1 klasą.
+Jak można zauważyć, najmniejszą szansę na przeżycie mieli mężczyźni w klasie 3. Kobiety z klas 1 i 2 przeżyły niemal w 100%, natomiast jeżeli chodzi o mężczyzn, to w klasach 1 i 2 przeżyli głównie chłopcy. W klasie 1 przeżyło około 50% dorosłych mężczyzn, natomiast w klasach 2 i 3 odsetek ten był znacznie niższy. Ciekawostką jest to, że kobiety z klasy najniższej (3), były ewakuowane w pierwszej kolejności przed mężczyznami z klasy najwyższej (1). 
+
+
+
+# Wnioski
+Cel analizy został spełniony - wyznaczone zostały najważniejsze cechy decydujące o przeżyciu. 
+Są nimi: płeć, wiek i klasa.
+Jeżeli żyłbyś nieco ponad 100 lat temu i chciałbyś wybrać się na podróż życia wspaniałym Tytanisem, są 3 warunki, które musisz spełnić, by zwiększyć swoje szanse na przeżycie.
+1) Nie bądź mężczyzną
+2) Jeżeli już jesteś mężczyzną, to nie bądź biedny
+3) Jeżeli nie jesteś biedny, to nie skąp pieniędzy na 1 klasę. Chłopiec z dolnego pokładu z zazdrością patrzył na bogactwo starszego pana z górnego pokładu.
+
+```{r finalplot, echo=FALSE}
+ggplot(tytanis, aes(x = Sex, fill = Survived)) +
+  geom_bar() +
+  facet_wrap(~Pclass) + 
+  ggtitle("sex, pclass, and survival") +
+  xlab("Sex") +
+  ylab("Total Count") +
+labs(fill = "Survived")
+```
